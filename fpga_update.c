@@ -132,22 +132,18 @@ unsigned char ReadID(int addr, int file_i2c) {
 	//printf("line: %d\n\r",__LINE__);
 	return 0;
 }
-unsigned char ReadJEDECID(int addr, int file_i2c) {
+unsigned char ReadJEDECID(int addr, int file_i2c,uint8_t *jd_id) {
 	uint8_t bt;
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE0, 0x00);
 
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x9F);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x0);
-        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &bt);
-	printf("read: 0x%x\n\r",bt);
+        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &jd_id[0]);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x0);
-        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &bt);
-	printf("read: 0x%x\n\r",bt);
+        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &jd_id[1]);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x0);
-        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &bt);
-	printf("read: 0x%x\n\r",bt);
+        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &jd_id[2]);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE0, 0x01);
-	//printf("line: %d\n\r",__LINE__);
 	return 0;
 }
 
@@ -187,7 +183,7 @@ uint8_t SWAP(uint8_t bt) {
 	return result;
 }
 
-void PageProgram(int addr, int file_i2c,uint8_t *buf,int sector_address) {
+void PageProgram(int addr, int file_i2c,uint8_t *buf,int sector_address,uint8_t swp) {
 	int i;
 	uint8_t bt;
 	WriteEnable(addr,file_i2c);
@@ -197,7 +193,7 @@ void PageProgram(int addr, int file_i2c,uint8_t *buf,int sector_address) {
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, (sector_address>>8)&0xff);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, (sector_address>>0)&0xff);
 	for(i=0;i<256;i++)
-		i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, SWAP(buf[i]));
+		i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, swp ? SWAP(buf[i]) : buf[i]);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE0, 0x01);
 
 	bt =  ReadStatus(addr,file_i2c);
@@ -263,10 +259,27 @@ void EEPROM_PageProgram(int file_i2c,int addr,uint8_t *buf,int sector_address) {
 	}
 }
 
+void EEPROM_PageRead(int file_i2c,int addr,uint8_t *buf,int sector_address) {
+	int i;
+	uint8_t bt;
+
+	i2c_ioctl_smbus_write (file_i2c, addr, 0xE0, 0x00);
+	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x02);
+	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, (sector_address>>8)&0xff);
+	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, (sector_address>>0)&0xff);
+	for(i=0;i<128;i++) {
+		i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x0);
+	        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &buf[i]);	
+
+	}
+	i2c_ioctl_smbus_write (file_i2c, addr, 0xE0, 0x01); // # CS HIGH
+}
+
 
 void EEPROM_Program(int chip_addr,int file_i2c, int sz){
 	uint8_t bt;
-	int i;
+	int i,j;
+	uint8_t t_buf[256];
 
         i2c_ioctl_smbus_read  (file_i2c, chip_addr, 0x0, &bt);	
 	bt |= 0x01; // Switch SPI Master to EEPROM mode
@@ -277,6 +290,18 @@ void EEPROM_Program(int chip_addr,int file_i2c, int sz){
 		if(i%1024 == 0)	printf("writed %d kbytes\n\r",i/1024);
 		EEPROM_PageProgram(file_i2c,chip_addr,&file_buf[i],i);
 	}
+/*
+	printf("Verify...\n\r");	
+	for(i=0;i<sz+128; i+=128) {
+		if(i%1024 == 0)	printf("readed %d kbytes\n\r",i/1024);
+		EEPROM_PageRead(file_i2c,chip_addr,t_buf,i);
+		for(j=0;j<128;j++) {
+			if(t_buf[j] != file_buf[i+j])
+				printf("DATA buf[%d]=0x%x but must be 0x%x\n\r",i+j, t_buf[j],file_buf[i+j]);
+		}	
+	}
+
+*/
 
         i2c_ioctl_smbus_read  (file_i2c, chip_addr, 0x0, &bt);	
 	bt &= 0xFE; // Switch SPI Master to SPI mode
@@ -285,31 +310,47 @@ void EEPROM_Program(int chip_addr,int file_i2c, int sz){
 }
 
 void SPI_Program(int chip_addr,int file_i2c, int sz){
-	uint8_t bt;
+	uint8_t bt,bmc_id,byte_swap;
+	uint8_t jd_id[4];
 	int i;
 
+	byte_swap = 0;
+        i2c_ioctl_smbus_read  (file_i2c, chip_addr, 0xFD, &bmc_id);
+	if(bmc_id == 0xA1) {
+		printf("GOWIN BMC A1 detected\n\r");
+		i2c_ioctl_smbus_write (file_i2c, chip_addr, 0x11, 0xAA);
+		byte_swap = 0;
+		sleep(1);
+	} else if(bmc_id == 0xCA) {
+		printf("Cyclone 10LP BMC detected\n\r");
+		byte_swap = 1;
+	}
+
+
+
         i2c_ioctl_smbus_read  (file_i2c, chip_addr, 0x0, &bt);	
-	bt &= 0xFE; // Switch SPI Master to SPI mode
-	i2c_ioctl_smbus_write (file_i2c, chip_addr, 0x0, bt);
+	//bt &= 0xFE; // Switch SPI Master to SPI mode
+	i2c_ioctl_smbus_write (file_i2c, chip_addr, 0x0, 0x04);
 
 	ResetDeviceFF(chip_addr,file_i2c);
 	GlobalUnlock(chip_addr,file_i2c);
 //	ResetDevice(chip_addr,file_i2c);
-	printf("JEDEC id:\n\r");		
-	ReadJEDECID(chip_addr,file_i2c);
+
+	ReadJEDECID(chip_addr,file_i2c,jd_id);
+	printf("JEDEC id: 0x%x 0x%x 0x%x\n\r",jd_id[0],jd_id[1],jd_id[2]);		
 	printf("Chip id:\n\r");	
         ReadID(chip_addr,file_i2c);
 	WriteEnable(chip_addr,file_i2c);
 	printf("Read status: 0x%x\n\r", ReadStatus(chip_addr,file_i2c));
 	WriteEnable(chip_addr,file_i2c);
 	printf("Read status: 0x%x\n\r", ReadStatus(chip_addr,file_i2c));
+//	return;
 	
 	//WriteEnable(chip_addr,file_i2c);
 //	while(1)
 	printf("Read status: 0x%x\n\r", ReadStatus(chip_addr,file_i2c));
 
-	        
-	                
+	       	                
 	printf("Erasing...\n\r");	
 	for(i=0;i<sz+256;i+=4*1024)
 		SectorErase(chip_addr,file_i2c,i);
@@ -318,7 +359,7 @@ void SPI_Program(int chip_addr,int file_i2c, int sz){
 	printf("Programming...\n\r");	
 	for(i=0;i<sz+256; i+=256) {
 		if(i%1024 == 0)	printf("writed %d kbytes\n\r",i/1024);
-		PageProgram(chip_addr,file_i2c,&file_buf[i],i);
+		PageProgram(chip_addr,file_i2c,&file_buf[i],i,byte_swap);
 	}
 	                  
 
@@ -334,6 +375,8 @@ void SPI_Program(int chip_addr,int file_i2c, int sz){
 		printf("bt[0x%x]=0x%x\n\r",i,bt);	
 	}
 	i2c_ioctl_smbus_write (file_i2c, chip_addr, 0xE0, 0x01); // # CS HIGH
+
+	i2c_ioctl_smbus_write (file_i2c, chip_addr, 0x11, 0x00);
 }
 
 int main(int argc, char** argv)
