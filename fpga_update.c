@@ -254,7 +254,7 @@ void EEPROM_PageProgram(int file_i2c,int addr,uint8_t *buf,int sector_address) {
 
 	EEPROM_ReadStatus(file_i2c,addr,&bt);
 	while(bt&0x01) {
-		if(bt&0x01)printf("line: %d, bt=0x%x\n\r",__LINE__,bt);
+//		if(bt&0x01)printf("line: %d, bt=0x%x\n\r",__LINE__,bt);
 		EEPROM_ReadStatus(file_i2c,addr,&bt);
 	}
 }
@@ -264,17 +264,44 @@ void EEPROM_PageRead(int file_i2c,int addr,uint8_t *buf,int sector_address) {
 	uint8_t bt;
 
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE0, 0x00);
-	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x02);
+	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x03);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, (sector_address>>8)&0xff);
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, (sector_address>>0)&0xff);
 	for(i=0;i<128;i++) {
-		i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x0);
+		//i2c_ioctl_smbus_write (file_i2c, addr, 0xE1, 0x0);
 	        i2c_ioctl_smbus_read  (file_i2c, addr, 0xE1, &buf[i]);	
 
 	}
 	i2c_ioctl_smbus_write (file_i2c, addr, 0xE0, 0x01); // # CS HIGH
 }
 
+unsigned int crc32b(uint8_t *message,int len) {
+   int i, j;
+   unsigned int byte, crc, mask;
+
+   i = 0;
+   crc = 0xFFFFFFFF;
+   while (len-->0) {
+      byte = message[i];            // Get next byte.
+      crc = crc ^ byte;
+      for (j = 7; j >= 0; j--) {    // Do eight times.
+         mask = -(crc & 1);
+         crc = (crc >> 1) ^ (0xEDB88320 & mask);
+      }
+      i = i + 1;
+   }
+   return ~crc;
+}
+
+unsigned int EEPROM_GetHash(int file_i2c,int chip_addr){
+	int i = 15*128;
+	uint8_t t_buf[256];
+
+	EEPROM_PageRead(file_i2c,chip_addr,t_buf,i);
+	uint32_t hash = crc32b(t_buf,128);
+	return hash;
+
+}
 
 void EEPROM_Program(int chip_addr,int file_i2c, int sz){
 	uint8_t bt;
@@ -284,13 +311,26 @@ void EEPROM_Program(int chip_addr,int file_i2c, int sz){
         i2c_ioctl_smbus_read  (file_i2c, chip_addr, 0x0, &bt);	
 	bt |= 0x01; // Switch SPI Master to EEPROM mode
 	i2c_ioctl_smbus_write (file_i2c, chip_addr, 0x0, bt);
+	
+	uint32_t hash = EEPROM_GetHash(file_i2c,chip_addr);
+	printf("Fingerprint: %X\n",hash);
+	switch(hash){
+		case 0x35F0AD07:
+			printf("Detected rev07\n");
+		break;
+		case 0x5FB925C9:
+			printf("Detected rev06\n");
+		break;
+		default:
+			printf("Unknown firmware\n");
+	}
 
 	printf("Programming...\n\r");	
 	for(i=0;i<sz+128; i+=128) {
 		if(i%1024 == 0)	printf("writed %d kbytes\n\r",i/1024);
 		EEPROM_PageProgram(file_i2c,chip_addr,&file_buf[i],i);
 	}
-/*
+	
 	printf("Verify...\n\r");	
 	for(i=0;i<sz+128; i+=128) {
 		if(i%1024 == 0)	printf("readed %d kbytes\n\r",i/1024);
@@ -300,8 +340,6 @@ void EEPROM_Program(int chip_addr,int file_i2c, int sz){
 				printf("DATA buf[%d]=0x%x but must be 0x%x\n\r",i+j, t_buf[j],file_buf[i+j]);
 		}	
 	}
-
-*/
 
         i2c_ioctl_smbus_read  (file_i2c, chip_addr, 0x0, &bt);	
 	bt &= 0xFE; // Switch SPI Master to SPI mode
@@ -469,4 +507,4 @@ int main(int argc, char** argv)
 	close(file_i2c);
     return 0;
 }
- 
+
