@@ -1,1 +1,0 @@
-/usr/bin/cc CMakeFiles/tofino_ver.dir/tofino_ver.c.o -o tofino_ver 
