@@ -1,0 +1,4 @@
+/home/artem/Documents/tofino/bmc_updater/CMakeFiles/rebuild_cache.dir
+/home/artem/Documents/tofino/bmc_updater/CMakeFiles/edit_cache.dir
+/home/artem/Documents/tofino/bmc_updater/CMakeFiles/tofino_ver.dir
+/home/artem/Documents/tofino/bmc_updater/CMakeFiles/fpga_update.dir

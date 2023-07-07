@@ -12,4 +12,8 @@ add_executable(fpga_update
 	fpga_update.c
 #        ${COMMON_SOURCES}
         )
-target_compile_definitions(fpga_update PUBLIC)
+
+add_executable(tofino_ver
+	tofino_ver.c
+)
+#target_compile_definitions(fpga_update PUBLIC)
