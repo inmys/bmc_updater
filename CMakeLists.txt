@@ -16,4 +16,8 @@ add_executable(fpga_update
 add_executable(tofino_ver
 	tofino_ver.c
 )
+
+add_executable(fpga_update_256Kb
+	fpga_update_256Kb.c
+)
 #target_compile_definitions(fpga_update PUBLIC)
